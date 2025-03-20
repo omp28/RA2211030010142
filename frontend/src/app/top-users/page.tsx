@@ -9,7 +9,7 @@ const fetcher = (url: string) => fetch(url).then((res) => res.json());
 export default function TopUsers() {
   const router = useRouter();
   const { data, error, isLoading } = useSWR<ApiResponse<TopUser[]>>(
-    "/api/top-users?limit=5",
+    `${process.env.NEXT_PUBLIC_API_BASE_URL}/users?limit=5`,
     fetcher
   );
 

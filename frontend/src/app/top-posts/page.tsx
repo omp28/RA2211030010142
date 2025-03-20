@@ -9,7 +9,7 @@ const fetcher = (url: string) => fetch(url).then((res) => res.json());
 export default function TopPosts() {
   const router = useRouter();
   const { data, error, isLoading } = useSWR<ApiResponse<TopPost[]>>(
-    "/api/top-posts?limit=5",
+    `${process.env.NEXT_PUBLIC_API_BASE_URL}/posts?type=popular&limit=5`,
     fetcher
   );
 
