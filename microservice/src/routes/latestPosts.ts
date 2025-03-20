@@ -5,6 +5,7 @@ const router = express.Router();
 
 router.get('/', async (req, res) => {
   try {
+    const limit = parseInt(req.query.limit as string || '5');
     const latestPosts = await getLatestPosts(limit);
     
     return res.json({
