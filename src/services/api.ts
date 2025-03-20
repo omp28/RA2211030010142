@@ -1,7 +1,16 @@
-import { User, Post, Comment } from '@/types';
-import { users } from '../../data/users';
-import { posts } from '../../data/posts'; 
-import { comments } from '../../data/comments';
+import axios from 'axios';
+import {User, Post, Comment} from '@/types';
+import { users as localUsers } from '../../data/users';
+import { posts as localPosts} from '../../data/posts'; 
+import { comments as localComments } from '../../data/comments';
+
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://20.244.56.144/test';
+const ENABLE_LOCAL_FALLBACK = process.env.NEXT_PUBLIC_ENABLE_LOCAL_FALLBACK === 'true';
+const API_TIMEOUT = parseInt(process.env.NEXT_PUBLIC_API_TIMEOUT || '5000');
+
+let authToken: string | null = null;
+let isApiAvailable = true; 
 
 const cache = {
   users: new Map<string, User>(),
@@ -11,12 +20,12 @@ const cache = {
   commentsCountByPost: new Map<number, number>(),
 };
 
-const initializeCache = () => {
-  users.forEach(user => {
+const initializeLocalData = () => {
+  localUsers.forEach(user => {
     cache.users.set(user.id, user);
   });
   
-  posts.forEach(post => {
+  localPosts.forEach(post => {
     cache.posts.set(post.id, post);
     
     const userId = post.userId.toString();
@@ -24,24 +33,209 @@ const initializeCache = () => {
     cache.postsCountByUser.set(userId, currentCount + 1);
   });
   
-  posts.forEach(post => {
-    const postComments = comments.filter(comment => comment.postId === post.id);
+  localPosts.forEach(post => {
+    const postComments = localComments.filter(comment => comment.postId === post.id);
     cache.comments.set(post.id, postComments);
     cache.commentsCountByPost.set(post.id, postComments.length);
   });
 };
 
-initializeCache();
+initializeLocalData();
+
+const api = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: API_TIMEOUT
+});
+
+export const resetApiStatus = () => {
+  isApiAvailable = true;
+};
+
+export const registerCompany = async (
+  companyName: string,
+  ownerName: string,
+  rollNo: string,
+  ownerEmail: string,
+  accessCode: string
+) => {
+  if (!isApiAvailable) {
+    throw new Error('API is not available and no local fallback for registration');
+  }
+
+  try {
+    const response = await api.post(`/register`, {
+      companyName,
+      ownerName,
+      rollNo,
+      ownerEmail,
+      accessCode,
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Registration failed:', error);
+    isApiAvailable = false;
+    throw error;
+  }
+};
+
+export const getAuthToken = async (
+  companyName: string,
+  clientID: string,
+  clientSecret: string,
+  ownerName: string,
+  ownerEmail: string,
+  rollNo: string
+) => {
+  if (!isApiAvailable) {
+    console.warn('API is not available, using mock auth token');
+    authToken = 'mock-token-for-local-development';
+    return authToken;
+  }
+
+  try {
+    const response = await api.post(`/auth`, {
+      companyName,
+      clientID,
+      clientSecret,
+      ownerName,
+      ownerEmail,
+      rollNo,
+    });
+    
+    authToken = response.data.access_token;
+    return authToken;
+  } catch (error) {
+    console.error('Authentication failed:', error);
+    console.warn('Falling back to local mock token');
+    isApiAvailable = false;
+    authToken = 'mock-token-for-local-development';
+    return authToken;
+  }
+};
+
+const getHeaders = () => {
+  if (!authToken) {
+    authToken = 'mock-token-for-local-development';
+  }
+  
+  return {
+    Authorization: `Bearer ${authToken}`,
+  };
+};
 
 export const fetchUsers = async (): Promise<User[]> => {
-  return [...cache.users.values()];
+  if (!isApiAvailable && ENABLE_LOCAL_FALLBACK) {
+    console.log('Using local user data');
+    return [...cache.users.values()];
+  }
+
+  try {
+    const response = await api.get(`/users`, { headers: getHeaders() });
+    const users = Object.entries(response.data.users).map(([id, name]) => ({
+      id,
+      name: name as string,
+    }));
+    
+    users.forEach(user => {
+      cache.users.set(user.id, user);
+    });
+    
+    return users;
+  } catch (error) {
+    console.error('Failed to fetch users:', error);
+    
+    isApiAvailable = false;
+    
+    if (ENABLE_LOCAL_FALLBACK) {
+      console.warn('Falling back to local user data');
+      return [...cache.users.values()];
+    }
+    
+    throw error;
+  }
 };
 
 export const fetchUserPosts = async (userId: string): Promise<Post[]> => {
-  const numericUserId = parseInt(userId);
-  return [...cache.posts.values()].filter(post => post.userId === numericUserId);
+  if (!isApiAvailable && ENABLE_LOCAL_FALLBACK) {
+    console.log(`Using local posts data for user ${userId}`);
+    const numericUserId = parseInt(userId);
+    return [...cache.posts.values()].filter(post => post.userId === numericUserId);
+  }
+
+  try {
+    const response = await api.get(`/users/${userId}/posts`, { headers: getHeaders() });
+    const posts = response.data.posts.map((post: any) => ({
+      id: post.id,
+      userId: parseInt(userId),
+      content: post.content,
+    }));
+    
+    posts.forEach((post: Post) => {
+      cache.posts.set(post.id, post);
+    });
+    
+    cache.postsCountByUser.set(userId, posts.length);
+    
+    return posts;
+  } catch (error) {
+    console.error(`Failed to fetch posts for user ${userId}:`, error);
+    
+    isApiAvailable = false;
+    
+    if (ENABLE_LOCAL_FALLBACK) {
+      console.warn(`Falling back to local posts data for user ${userId}`);
+      const numericUserId = parseInt(userId);
+      return [...cache.posts.values()].filter(post => post.userId === numericUserId);
+    }
+    
+    throw error;
+  }
 };
 
 export const fetchPostComments = async (postId: number): Promise<Comment[]> => {
-  return cache.comments.get(postId) || [];
+  if (!isApiAvailable && ENABLE_LOCAL_FALLBACK) {
+    console.log(`Using local comments data for post ${postId}`);
+    return cache.comments.get(postId) || [];
+  }
+
+  try {
+    const response = await api.get(`/posts/${postId}/comments`, { headers: getHeaders() });
+    const comments = response.data.comments.map((comment: any) => ({
+      id: comment.id,
+      postId,
+      content: comment.content,
+    }));
+    
+    cache.comments.set(postId, comments);
+    cache.commentsCountByPost.set(postId, comments.length);
+    
+    return comments;
+  } catch (error) {
+    console.error(`Failed to fetch comments for post ${postId}:`, error);
+    
+    isApiAvailable = false;
+    
+    if (ENABLE_LOCAL_FALLBACK) {
+      console.warn(`Falling back to local comments data for post ${postId}`);
+      return cache.comments.get(postId) || [];
+    }
+    
+    throw error;
+  }
+};
+
+export const checkApiAvailability = async (): Promise<boolean> => {
+  try {
+    await api.get('/health', { timeout: 2000 });
+    isApiAvailable = true;
+    return true;
+  } catch (error) {
+    console.warn('API health check failed, will use local data');
+    isApiAvailable = false;
+    return false;
+  }
+};
+
+export const useLocalData = () => {
+  isApiAvailable = false;
 };
