@@ -51,68 +51,6 @@ export const resetApiStatus = () => {
   isApiAvailable = true;
 };
 
-export const registerCompany = async (
-  companyName: string,
-  ownerName: string,
-  rollNo: string,
-  ownerEmail: string,
-  accessCode: string
-) => {
-  if (!isApiAvailable) {
-    throw new Error('API is not available and no local fallback for registration');
-  }
-
-  try {
-    const response = await api.post(`/register`, {
-      companyName,
-      ownerName,
-      rollNo,
-      ownerEmail,
-      accessCode,
-    });
-    return response.data;
-  } catch (error) {
-    console.error('Registration failed:', error);
-    isApiAvailable = false;
-    throw error;
-  }
-};
-
-export const getAuthToken = async (
-  companyName: string,
-  clientID: string,
-  clientSecret: string,
-  ownerName: string,
-  ownerEmail: string,
-  rollNo: string
-) => {
-  if (!isApiAvailable) {
-    console.warn('API is not available, using mock auth token');
-    authToken = 'mock-token-for-local-development';
-    return authToken;
-  }
-
-  try {
-    const response = await api.post(`/auth`, {
-      companyName,
-      clientID,
-      clientSecret,
-      ownerName,
-      ownerEmail,
-      rollNo,
-    });
-    
-    authToken = response.data.access_token;
-    return authToken;
-  } catch (error) {
-    console.error('Authentication failed:', error);
-    console.warn('Falling back to local mock token');
-    isApiAvailable = false;
-    authToken = 'mock-token-for-local-development';
-    return authToken;
-  }
-};
-
 const getHeaders = () => {
   if (!authToken) {
     authToken = 'mock-token-for-local-development';
@@ -226,7 +164,7 @@ export const fetchPostComments = async (postId: number): Promise<Comment[]> => {
 
 export const checkApiAvailability = async (): Promise<boolean> => {
   try {
-    await api.get('/health', { timeout: 2000 });
+    await api.get(`${API_BASE_URL}/health`, { timeout: API_TIMEOUT });
     isApiAvailable = true;
     return true;
   } catch (error) {
